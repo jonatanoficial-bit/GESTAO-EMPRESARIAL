@@ -13,7 +13,7 @@ Basta abrir o arquivo `index.html` no navegador.
    - Branch: `main` / `/ (root)`
 4. Aguarde e acesse o link gerado.
 
-## O que já tem (v0.1)
+## O que já tem (v0.2)
 - Lançamentos de entrada/saída (salvo no navegador via localStorage)
 - Filtros por mês e tipo
 - KPIs (saldo, entradas e saídas do mês)
@@ -26,3 +26,7 @@ Basta abrir o arquivo `index.html` no navegador.
 - Relatórios anuais + gráficos
 - Backup/importação (JSON)
 - Módulo de “Sugestões” com regras mais avançadas
+
+
+## Novidade (v0.2)
+- Backup e restauração via JSON (exportar/importar)

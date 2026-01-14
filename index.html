@@ -203,6 +203,20 @@
           <button class="btn primary" id="btnSaveCfg">Salvar</button>
         </div>
 
+        
+        <div class="panel">
+          <h3>Backup e restauração</h3>
+          <p class="muted small">Exporta/Importa tudo (configurações + lançamentos) em JSON. Útil para backup e troca de dispositivo.</p>
+          <div class="actions">
+            <button class="btn primary" id="btnExportJson">Exportar JSON</button>
+            <label class="btn filelike">
+              Importar JSON
+              <input id="fileImportJson" type="file" accept="application/json" />
+            </label>
+          </div>
+          <p class="muted small" id="backupHint"></p>
+        </div>
+
         <details class="details">
           <summary>Roadmap (próximas etapas)</summary>
           <ul class="list">

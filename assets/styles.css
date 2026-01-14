@@ -211,3 +211,14 @@ input, select{
   .grid-2{ grid-template-columns: 1fr 1fr; }
   .hero h1{ font-size: 20px; }
 }
+
+
+label.filelike{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+}
+label.filelike input[type="file"]{
+  display:none;
+}

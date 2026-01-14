@@ -2,6 +2,82 @@
 // Diretrizes: mobile-first, incremental, sem suposições arriscadas.
 
 const LS_KEY = "gmpe_v01_state";
+const APP_VERSION = "0.2";
+const SCHEMA_VERSION = 1;
+
+function deepClone(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function isValidState(obj){
+  // Validação defensiva (mínima) para evitar corromper dados
+  if(!obj || typeof obj !== "object") return false;
+  if(!obj.cfg || typeof obj.cfg !== "object") return false;
+  if(!Array.isArray(obj.tx)) return false;
+
+  const cfg = obj.cfg;
+  if(typeof cfg.company !== "string") return false;
+  if(typeof cfg.currency !== "string") return false;
+  if(typeof cfg.theme !== "string") return false;
+
+  for(const t of obj.tx){
+    if(!t || typeof t !== "object") return false;
+    if(typeof t.id !== "string") return false;
+    if(t.type !== "income" && t.type !== "expense") return false;
+    if(typeof t.date !== "string") return false;
+    if(typeof t.amount !== "number" || !isFinite(t.amount) || t.amount < 0) return false;
+    if(typeof t.category !== "string") return false;
+    if(typeof t.note !== "string") return false;
+  }
+  return true;
+}
+
+function downloadText(filename, text, mime="application/json;charset=utf-8"){
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportJson(){
+  const payload = {
+    meta: { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString() },
+    state: deepClone(state)
+  };
+  const filename = `gestao-mpe-backup-${new Date().toISOString().slice(0,10)}.json`;
+  downloadText(filename, JSON.stringify(payload, null, 2));
+  const hint = document.getElementById("backupHint");
+  if(hint) hint.textContent = `Backup gerado: ${filename}`;
+}
+
+async function importJsonFile(file){
+  const hint = document.getElementById("backupHint");
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const candidate = data?.state ?? data; // aceita payload completo ou somente state
+    if(!isValidState(candidate)){
+      throw new Error("JSON inválido ou incompatível com este protótipo.");
+    }
+    state = candidate;
+    saveState();
+    renderAll();
+    if(hint) hint.textContent = `Backup importado com sucesso (${file.name}).`;
+    alert("Importação concluída.");
+  }catch(err){
+    if(hint) hint.textContent = `Falha ao importar: ${String(err.message || err)}`;
+    alert("Não foi possível importar este arquivo. Verifique se é um backup do Gestão MPE.");
+  }finally{
+    const inp = document.getElementById("fileImportJson");
+    if(inp) inp.value = "";
+  }
+}
+
 
 function nowISODate(){
   const d = new Date();
@@ -347,6 +423,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnWipe").addEventListener("click", wipeAll);
   document.getElementById("btnExportCsv").addEventListener("click", exportCsv);
   document.getElementById("btnSaveCfg").addEventListener("click", saveConfig);
+  document.getElementById("btnExportJson").addEventListener("click", exportJson);
+  document.getElementById("fileImportJson").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if(file) importJsonFile(file);
+  });
+
 
   document.getElementById("btnTheme").addEventListener("click", () => {
     setTheme(state.cfg.theme === "light" ? "dark" : "light");
