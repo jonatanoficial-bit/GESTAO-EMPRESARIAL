@@ -13,7 +13,7 @@
       <span class="logo">GM</span>
       <div class="brand-text">
         <div class="brand-name">Gestão MPE</div>
-        <div class="brand-sub">v0.4 • offline</div>
+        <div class="brand-sub">v0.5 • offline</div>
       </div>
     </div>
 
@@ -26,7 +26,7 @@
     <section class="card hero">
       <div>
         <h1>Visão rápida</h1>
-        <p class="muted">Cadastre entradas e saídas por conta e centro de custo, acompanhe o saldo e gere relatórios com gráficos.</p>
+        <p class="muted">Controle financeiro por conta e centro de custo, relatórios anuais, tendências e importação CSV.</p>
       </div>
 
       <div class="kpis">
@@ -201,11 +201,43 @@
           <div class="panel">
             <h3>Gráfico: Saldo por conta</h3>
             <canvas id="chartBars" width="520" height="320" aria-label="Gráfico de barras"></canvas>
-            <div class="muted small">Escala automática. Valores incluem saldo inicial + lançamentos.</div>
+            <div class="muted small">Valores incluem saldo inicial + lançamentos.</div>
           </div>
         </div>
 
-        <p class="muted small">Dica: os relatórios usam o <strong>mês selecionado</strong> nos filtros da tela de Lançamentos.</p>
+        <div class="card">
+          <div class="row space">
+            <h2>Relatório anual</h2>
+            <div class="filters">
+              <select id="filterYear" aria-label="Selecionar ano"></select>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="panel">
+              <h3>Resumo do ano</h3>
+              <div class="mini" id="yearSummary"></div>
+            </div>
+
+            <div class="panel">
+              <h3>Tendência: resultado mês a mês</h3>
+              <canvas id="chartTrend" width="520" height="320" aria-label="Gráfico de linha"></canvas>
+              <div class="muted small">Linha = (Entradas - Saídas) de cada mês.</div>
+            </div>
+
+            <div class="panel">
+              <h3>Ranking de categorias (ano)</h3>
+              <div class="mini" id="yearByCategory"></div>
+            </div>
+
+            <div class="panel">
+              <h3>Insights automáticos (ano)</h3>
+              <div class="mini" id="yearInsights"></div>
+            </div>
+          </div>
+        </div>
+
+        <p class="muted small">Relatórios do mês usam o filtro de mês da tela de Lançamentos. O relatório anual usa o seletor de ano acima.</p>
       </div>
     </section>
 
@@ -230,7 +262,7 @@
         </div>
 
         <div class="panel">
-          <h3>Sugestões automáticas (rascunho)</h3>
+          <h3>Sugestões automáticas (mês)</h3>
           <ul class="list" id="projTips"></ul>
         </div>
       </div>
@@ -262,6 +294,21 @@
         </div>
 
         <div class="panel">
+          <h3>Importar CSV</h3>
+          <p class="muted small">
+            Aceita CSV no formato exportado pelo app (colunas: id,type,date,amount,account,costCenter,category,note).
+            Se a conta/centro não existir, ele cria automaticamente.
+          </p>
+          <div class="actions">
+            <label class="btn filelike">
+              Selecionar CSV
+              <input id="fileImportCsv" type="file" accept=".csv,text/csv" />
+            </label>
+          </div>
+          <p class="muted small" id="csvHint"></p>
+        </div>
+
+        <div class="panel">
           <h3>Backup e restauração</h3>
           <p class="muted small">Exporta/Importa tudo (configurações + lançamentos) em JSON.</p>
           <div class="actions">
@@ -277,8 +324,8 @@
         <details class="details">
           <summary>Roadmap (próximas etapas)</summary>
           <ul class="list">
-            <li>Importação CSV e categorização automática.</li>
-            <li>Relatório anual + tendências por mês.</li>
+            <li>ETAPA 6: visual AAA luxuoso, padrão internacional (UI/UX comercial).</li>
+            <li>Importação CSV inteligente (mapear categorias automaticamente).</li>
             <li>Multiusuário e sincronização (quando houver backend).</li>
           </ul>
         </details>
@@ -286,7 +333,7 @@
     </section>
 
     <footer class="footer">
-      <span class="muted small">v0.4 • Mobile-first • GitHub Pages</span>
+      <span class="muted small">v0.5 • Mobile-first • GitHub Pages</span>
     </footer>
   </main>
 
