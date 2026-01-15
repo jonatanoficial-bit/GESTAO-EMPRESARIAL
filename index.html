@@ -13,7 +13,7 @@
       <span class="logo">GM</span>
       <div class="brand-text">
         <div class="brand-name">Gestão MPE</div>
-        <div class="brand-sub">v0.3 • offline</div>
+        <div class="brand-sub">v0.4 • offline</div>
       </div>
     </div>
 
@@ -26,7 +26,7 @@
     <section class="card hero">
       <div>
         <h1>Visão rápida</h1>
-        <p class="muted">Cadastre entradas e saídas por conta e centro de custo, acompanhe o saldo e exporte relatórios.</p>
+        <p class="muted">Cadastre entradas e saídas por conta e centro de custo, acompanhe o saldo e gere relatórios com gráficos.</p>
       </div>
 
       <div class="kpis">
@@ -129,6 +129,8 @@
               <option value="income">Entradas</option>
               <option value="expense">Saídas</option>
             </select>
+            <select id="filterAccount" aria-label="Filtrar por conta"></select>
+            <select id="filterCostCenter" aria-label="Filtrar por centro de custo"></select>
           </div>
         </div>
 
@@ -159,7 +161,8 @@
         <div class="row space">
           <h2>Relatórios</h2>
           <div class="actions">
-            <button class="btn primary" id="btnExportCsv">Exportar CSV</button>
+            <button class="btn primary" id="btnExportCsvAll">Exportar CSV (Tudo)</button>
+            <button class="btn" id="btnExportCsvFiltered">Exportar CSV (Filtrado)</button>
           </div>
         </div>
 
@@ -170,22 +173,39 @@
           </div>
 
           <div class="panel">
-            <h3>Por categoria</h3>
+            <h3>Top 5 gastos (mês)</h3>
+            <div class="mini" id="reportTopExpenses"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Por categoria (saldo no mês)</h3>
             <div class="mini" id="reportByCategory"></div>
           </div>
 
           <div class="panel">
-            <h3>Por conta</h3>
+            <h3>Por conta (saldo no mês)</h3>
             <div class="mini" id="reportByAccount"></div>
           </div>
 
           <div class="panel">
-            <h3>Por centro de custo</h3>
+            <h3>Por centro de custo (saldo no mês)</h3>
             <div class="mini" id="reportByCostCenter"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Gráfico: Saídas por categoria</h3>
+            <canvas id="chartPie" width="520" height="320" aria-label="Gráfico de pizza"></canvas>
+            <div class="muted small" id="chartPieLegend"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Gráfico: Saldo por conta</h3>
+            <canvas id="chartBars" width="520" height="320" aria-label="Gráfico de barras"></canvas>
+            <div class="muted small">Escala automática. Valores incluem saldo inicial + lançamentos.</div>
           </div>
         </div>
 
-        <p class="muted small">Observação: este protótipo roda offline e salva no seu navegador (localStorage).</p>
+        <p class="muted small">Dica: os relatórios usam o <strong>mês selecionado</strong> nos filtros da tela de Lançamentos.</p>
       </div>
     </section>
 
@@ -257,8 +277,8 @@
         <details class="details">
           <summary>Roadmap (próximas etapas)</summary>
           <ul class="list">
-            <li>Relatórios anuais + gráficos.</li>
             <li>Importação CSV e categorização automática.</li>
+            <li>Relatório anual + tendências por mês.</li>
             <li>Multiusuário e sincronização (quando houver backend).</li>
           </ul>
         </details>
@@ -266,7 +286,7 @@
     </section>
 
     <footer class="footer">
-      <span class="muted small">v0.3 • Mobile-first • GitHub Pages</span>
+      <span class="muted small">v0.4 • Mobile-first • GitHub Pages</span>
     </footer>
   </main>
 
