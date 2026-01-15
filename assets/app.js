@@ -1,10 +1,10 @@
-// Gestão MPE — v0.3 (Etapa 3)
-// Contas (Caixa/Bancos) + Centro de Custos + Relatórios por conta/centro
+// Gestão MPE — v0.4 (Etapa 4)
+// Relatórios avançados + Gráficos (Canvas) + Filtros por conta/centro + CSV filtrado
 // Offline-first | Mobile-first | Incremental | Sem suposições arriscadas
 
-const LS_KEY = "gmpe_v03_state";
-const APP_VERSION = "0.3";
-const SCHEMA_VERSION = 3;
+const LS_KEY = "gmpe_v04_state";
+const APP_VERSION = "0.4";
+const SCHEMA_VERSION = 4;
 
 /* =========================
    UTILIDADES
@@ -33,6 +33,23 @@ function moneyFmt(value, currency="BRL"){
 
 function deepClone(obj){
   return JSON.parse(JSON.stringify(obj));
+}
+
+function downloadText(filename, text, mime="text/plain;charset=utf-8"){
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function safeNumber(n){
+  const v = Number(n);
+  return isFinite(v) ? v : 0;
 }
 
 /* =========================
@@ -101,136 +118,90 @@ let state = loadState();
 
 function loadState(){
   const raw = localStorage.getItem(LS_KEY);
-  if(!raw) return defaultState();
+
+  // Migração: se não houver gmpe_v04_state, tentar ler chaves antigas e migrar
+  if(!raw){
+    const legacyKeys = ["gmpe_v03_state", "gmpe_v02_state", "gmpe_v01_state"];
+    for(const k of legacyKeys){
+      const r = localStorage.getItem(k);
+      if(!r) continue;
+      try{
+        const legacy = JSON.parse(r);
+        const migrated = migrateAnyToV04(legacy);
+        if(isValidState(migrated)){
+          localStorage.setItem(LS_KEY, JSON.stringify(migrated));
+          return migrated;
+        }
+      }catch{}
+    }
+    return defaultState();
+  }
 
   try{
     const parsed = JSON.parse(raw);
-
-    // Migração simples: se vier de versões antigas sem accounts/costCenters, cria defaults
-    if(parsed && typeof parsed === "object"){
-      if(!Array.isArray(parsed.accounts) || parsed.accounts.length === 0){
-        parsed.accounts = [{ id: uid(), name:"Caixa", initialBalance: 0 }];
-      }
-      if(!Array.isArray(parsed.costCenters) || parsed.costCenters.length === 0){
-        parsed.costCenters = [{ id: uid(), name:"Operacional" }];
-      }
-      // Garantir cfg
-      parsed.cfg = parsed.cfg || { company:"", currency:"BRL", theme:"dark" };
-      parsed.cfg.company = parsed.cfg.company ?? "";
-      parsed.cfg.currency = parsed.cfg.currency ?? "BRL";
-      parsed.cfg.theme = parsed.cfg.theme ?? "dark";
-
-      // Ajustar tx antigas sem accountId/costCenterId (associa ao primeiro de cada)
-      const acc0 = parsed.accounts[0].id;
-      const cost0 = parsed.costCenters[0].id;
-      if(Array.isArray(parsed.tx)){
-        parsed.tx = parsed.tx.map(t => ({
-          id: String(t.id ?? uid()),
-          type: t.type === "expense" ? "expense" : "income",
-          date: String(t.date ?? nowISODate()),
-          amount: Number(t.amount ?? 0),
-          accountId: String(t.accountId ?? acc0),
-          costCenterId: String(t.costCenterId ?? cost0),
-          category: String(t.category ?? "Sem categoria"),
-          note: String(t.note ?? "")
-        }));
-      }else{
-        parsed.tx = [];
-      }
-
-      parsed.meta = { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION };
-
-      // Se ainda assim ficar inconsistente, volta pro default
-      if(!isValidState(parsed)) return defaultState();
-      return parsed;
+    if(!isValidState(parsed)){
+      // tentar migrar mesmo assim
+      const migrated = migrateAnyToV04(parsed);
+      if(isValidState(migrated)) return migrated;
+      return defaultState();
     }
-
-    return defaultState();
+    return parsed;
   }catch{
     return defaultState();
   }
 }
 
+function migrateAnyToV04(any){
+  // Aceita estados antigos (com ou sem accounts/costCenters) e normaliza para v0.4
+  const base = defaultState();
+
+  const cfg = any?.cfg || {};
+  base.cfg.company = String(cfg.company ?? "");
+  base.cfg.currency = String(cfg.currency ?? "BRL");
+  base.cfg.theme = String(cfg.theme ?? "dark");
+
+  // accounts
+  if(Array.isArray(any?.accounts) && any.accounts.length){
+    base.accounts = any.accounts.map(a => ({
+      id: String(a.id ?? uid()),
+      name: String(a.name ?? "Conta"),
+      initialBalance: safeNumber(a.initialBalance ?? 0)
+    })).filter(a => a.name.trim());
+    if(base.accounts.length === 0) base.accounts = defaultState().accounts;
+  }
+
+  // cost centers
+  if(Array.isArray(any?.costCenters) && any.costCenters.length){
+    base.costCenters = any.costCenters.map(c => ({
+      id: String(c.id ?? uid()),
+      name: String(c.name ?? "Centro")
+    })).filter(c => c.name.trim());
+    if(base.costCenters.length === 0) base.costCenters = defaultState().costCenters;
+  }
+
+  const acc0 = base.accounts[0].id;
+  const cost0 = base.costCenters[0].id;
+
+  // tx
+  if(Array.isArray(any?.tx)){
+    base.tx = any.tx.map(t => ({
+      id: String(t.id ?? uid()),
+      type: t.type === "expense" ? "expense" : "income",
+      date: String(t.date ?? nowISODate()),
+      amount: safeNumber(t.amount ?? 0),
+      accountId: String(t.accountId ?? acc0),
+      costCenterId: String(t.costCenterId ?? cost0),
+      category: String(t.category ?? "Sem categoria"),
+      note: String(t.note ?? "")
+    }));
+  }
+
+  base.meta = { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION };
+  return base;
+}
+
 function saveState(){
   localStorage.setItem(LS_KEY, JSON.stringify(state));
-}
-
-/* =========================
-   DOWNLOADS (CSV/JSON)
-========================= */
-function downloadText(filename, text, mime="text/plain;charset=utf-8"){
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function exportCsv(){
-  const header = ["id","type","date","amount","account","costCenter","category","note"];
-  const rows = [header.join(",")];
-
-  const accById = new Map(state.accounts.map(a => [a.id, a.name]));
-  const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
-
-  for(const t of state.tx){
-    const row = [
-      t.id,
-      t.type,
-      t.date,
-      String(t.amount),
-      accById.get(t.accountId) || "",
-      costById.get(t.costCenterId) || "",
-      (t.category || "").replaceAll('"','""'),
-      (t.note || "").replaceAll('"','""')
-    ].map(v => `"${String(v)}"`).join(",");
-    rows.push(row);
-  }
-
-  downloadText(`gestao-mpe-${new Date().toISOString().slice(0,10)}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
-}
-
-function exportJson(){
-  const payload = {
-    meta: { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString() },
-    state: deepClone(state)
-  };
-  const filename = `gestao-mpe-backup-${new Date().toISOString().slice(0,10)}.json`;
-  downloadText(filename, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
-  const hint = document.getElementById("backupHint");
-  if(hint) hint.textContent = `Backup gerado: ${filename}`;
-}
-
-async function importJsonFile(file){
-  const hint = document.getElementById("backupHint");
-  try{
-    const text = await file.text();
-    const data = JSON.parse(text);
-    const candidate = data?.state ?? data;
-
-    if(!isValidState(candidate)){
-      throw new Error("JSON inválido ou incompatível.");
-    }
-
-    state = candidate;
-    // garantir meta atual
-    state.meta = { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION };
-
-    saveState();
-    renderAll();
-    if(hint) hint.textContent = `Backup importado com sucesso (${file.name}).`;
-    alert("Importação concluída.");
-  }catch(err){
-    if(hint) hint.textContent = `Falha ao importar: ${String(err.message || err)}`;
-    alert("Não foi possível importar este arquivo. Verifique se é um backup do Gestão MPE.");
-  }finally{
-    const inp = document.getElementById("fileImportJson");
-    if(inp) inp.value = "";
-  }
 }
 
 /* =========================
@@ -247,6 +218,10 @@ function switchView(name){
   document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
   document.querySelector(`#view-${name}`).classList.remove("hidden");
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === name));
+  // Re-render gráficos quando entrar em relatórios (para garantir tamanho correto)
+  if(name === "relatorios"){
+    renderReportsAndCharts();
+  }
 }
 
 /* =========================
@@ -269,7 +244,49 @@ function buildMonthOptions(){
     opt.textContent = m.replace("-", "/");
     sel.appendChild(opt);
   }
-  sel.value = currentMonth();
+
+  if(!sel.value) sel.value = currentMonth();
+  if(!arr.includes(sel.value)) sel.value = currentMonth();
+}
+
+function buildAccountFilter(){
+  const sel = document.getElementById("filterAccount");
+  sel.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "all";
+  optAll.textContent = "Todas contas";
+  sel.appendChild(optAll);
+
+  for(const a of state.accounts){
+    const opt = document.createElement("option");
+    opt.value = a.id;
+    opt.textContent = a.name;
+    sel.appendChild(opt);
+  }
+
+  if(!sel.value) sel.value = "all";
+  const exists = sel.value === "all" || state.accounts.some(a => a.id === sel.value);
+  if(!exists) sel.value = "all";
+}
+
+function buildCostCenterFilter(){
+  const sel = document.getElementById("filterCostCenter");
+  sel.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "all";
+  optAll.textContent = "Todos centros";
+  sel.appendChild(optAll);
+
+  for(const c of state.costCenters){
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  }
+
+  if(!sel.value) sel.value = "all";
+  const exists = sel.value === "all" || state.costCenters.some(c => c.id === sel.value);
+  if(!exists) sel.value = "all";
 }
 
 function totalsForMonth(month){
@@ -280,7 +297,6 @@ function totalsForMonth(month){
 }
 
 function balanceOverall(){
-  // saldo total = soma dos saldos iniciais + entradas - saídas
   let total = state.accounts.reduce((s,a)=> s + (a.initialBalance || 0), 0);
   for(const t of state.tx){
     total += (t.type === "income") ? t.amount : -t.amount;
@@ -297,10 +313,30 @@ function accountBalance(accountId){
   return total;
 }
 
+function getCurrentFilters(){
+  const month = document.getElementById("filterMonth").value;
+  const type = document.getElementById("filterType").value;
+  const account = document.getElementById("filterAccount").value;
+  const cost = document.getElementById("filterCostCenter").value;
+  return { month, type, account, cost };
+}
+
+function filteredTx(){
+  const { month, type, account, cost } = getCurrentFilters();
+  let tx = state.tx.slice();
+  tx = tx.filter(t => monthKey(t.date) === month);
+  if(type !== "all") tx = tx.filter(t => t.type === type);
+  if(account !== "all") tx = tx.filter(t => t.accountId === account);
+  if(cost !== "all") tx = tx.filter(t => t.costCenterId === cost);
+  // ordenado
+  tx.sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+  return tx;
+}
+
 function renderKpis(){
   const currency = state.cfg.currency;
-  const m = document.getElementById("filterMonth")?.value || currentMonth();
-  const { income, expense } = totalsForMonth(m);
+  const { month } = getCurrentFilters();
+  const { income, expense } = totalsForMonth(month);
 
   document.getElementById("kpiBalance").textContent = moneyFmt(balanceOverall(), currency);
   document.getElementById("kpiIncome").textContent = moneyFmt(income, currency);
@@ -423,40 +459,17 @@ function addCostCenter(){
   renderAll();
 }
 
-function deleteCostCenter(id){
-  if(state.costCenters.length <= 1){
-    alert("Você precisa ter pelo menos 1 centro de custo.");
-    return;
-  }
-
-  const used = state.tx.some(t => t.costCenterId === id);
-  if(used){
-    alert("Não é possível excluir: existe lançamento vinculado a este centro de custo.");
-    return;
-  }
-
-  if(!confirm("Excluir este centro de custo?")) return;
-  state.costCenters = state.costCenters.filter(c => c.id !== id);
-  saveState();
-  renderAll();
-}
-
 /* =========================
    TABELA DE LANÇAMENTOS
 ========================= */
 function renderTable(){
-  const month = document.getElementById("filterMonth").value;
-  const type = document.getElementById("filterType").value;
-
   const tbody = document.getElementById("txTable");
   tbody.innerHTML = "";
 
   const accById = new Map(state.accounts.map(a => [a.id, a.name]));
   const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
 
-  let tx = state.tx.slice().sort((a,b) => (b.date || "").localeCompare(a.date || ""));
-  tx = tx.filter(t => monthKey(t.date) === month);
-  if(type !== "all") tx = tx.filter(t => t.type === type);
+  const tx = filteredTx();
 
   if(tx.length === 0){
     document.getElementById("txHint").textContent = "Sem lançamentos para este filtro.";
@@ -513,57 +526,207 @@ function deleteTx(id){
 }
 
 /* =========================
-   RELATÓRIOS
+   RELATÓRIOS (TEXTO)
 ========================= */
-function renderReports(){
-  const month = document.getElementById("filterMonth").value;
+function reportMonthSummary(month){
   const currency = state.cfg.currency;
-
   const tx = state.tx.filter(t => monthKey(t.date) === month);
+  const income = tx.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
+  const expense = tx.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
+  const net = income - expense;
 
-  const { income, expense, net } = totalsForMonth(month);
-
-  document.getElementById("reportMonthSummary").textContent = [
+  return [
     `Mês: ${month.replace("-", "/")}`,
     `Entradas:  ${moneyFmt(income, currency)}`,
     `Saídas:    ${moneyFmt(expense, currency)}`,
     `Resultado: ${moneyFmt(net, currency)}`
   ].join("\n");
+}
 
-  // Por categoria (saldo assinado)
-  const byCat = new Map();
+function reportSignedByKey(tx, keyGetter){
+  const currency = state.cfg.currency;
+  const m = new Map();
   for(const t of tx){
-    const key = t.category || "Sem categoria";
-    const signed = (t.type === "income") ? t.amount : -t.amount;
-    byCat.set(key, (byCat.get(key) || 0) + signed);
+    const k = keyGetter(t);
+    const signed = t.type === "income" ? t.amount : -t.amount;
+    m.set(k, (m.get(k) || 0) + signed);
   }
-  const catArr = Array.from(byCat.entries()).sort((a,b)=> Math.abs(b[1]) - Math.abs(a[1]));
-  document.getElementById("reportByCategory").textContent =
-    catArr.length ? catArr.map(([k,v]) => `${k}: ${moneyFmt(v, currency)}`).join("\n") : "Sem dados.";
+  const arr = Array.from(m.entries()).sort((a,b)=> Math.abs(b[1]) - Math.abs(a[1]));
+  if(arr.length === 0) return "Sem dados.";
+  return arr.map(([k,v]) => `${k}: ${moneyFmt(v, currency)}`).join("\n");
+}
 
-  // Por conta (saldo assinado no mês)
-  const byAcc = new Map();
-  for(const t of tx){
-    const key = t.accountId;
-    const signed = (t.type === "income") ? t.amount : -t.amount;
-    byAcc.set(key, (byAcc.get(key) || 0) + signed);
-  }
-  const accArr = Array.from(byAcc.entries()).sort((a,b)=> Math.abs(b[1]) - Math.abs(a[1]));
+function reportTopExpenses(tx){
+  const currency = state.cfg.currency;
+  const exp = tx.filter(t => t.type === "expense").slice().sort((a,b)=> b.amount - a.amount).slice(0,5);
+  if(exp.length === 0) return "Sem dados.";
   const accById = new Map(state.accounts.map(a => [a.id, a.name]));
-  document.getElementById("reportByAccount").textContent =
-    accArr.length ? accArr.map(([id,v]) => `${accById.get(id) || "—"}: ${moneyFmt(v, currency)}`).join("\n") : "Sem dados.";
-
-  // Por centro de custo (saldo assinado no mês)
-  const byCost = new Map();
-  for(const t of tx){
-    const key = t.costCenterId;
-    const signed = (t.type === "income") ? t.amount : -t.amount;
-    byCost.set(key, (byCost.get(key) || 0) + signed);
-  }
-  const costArr = Array.from(byCost.entries()).sort((a,b)=> Math.abs(b[1]) - Math.abs(a[1]));
   const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
-  document.getElementById("reportByCostCenter").textContent =
-    costArr.length ? costArr.map(([id,v]) => `${costById.get(id) || "—"}: ${moneyFmt(v, currency)}`).join("\n") : "Sem dados.";
+
+  return exp.map(t => {
+    const acc = accById.get(t.accountId) || "—";
+    const cost = costById.get(t.costCenterId) || "—";
+    return `${t.date} • ${t.category} • ${acc}/${cost} • ${moneyFmt(t.amount, currency)}`;
+  }).join("\n");
+}
+
+function renderReports(){
+  const { month } = getCurrentFilters();
+  const txMonth = state.tx.filter(t => monthKey(t.date) === month);
+
+  const accById = new Map(state.accounts.map(a => [a.id, a.name]));
+  const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
+
+  document.getElementById("reportMonthSummary").textContent = reportMonthSummary(month);
+  document.getElementById("reportTopExpenses").textContent = reportTopExpenses(txMonth);
+
+  document.getElementById("reportByCategory").textContent = reportSignedByKey(txMonth, (t)=> t.category || "Sem categoria");
+  document.getElementById("reportByAccount").textContent = reportSignedByKey(txMonth, (t)=> accById.get(t.accountId) || "—");
+  document.getElementById("reportByCostCenter").textContent = reportSignedByKey(txMonth, (t)=> costById.get(t.costCenterId) || "—");
+}
+
+/* =========================
+   GRÁFICOS (CANVAS)
+========================= */
+function clearCanvas(ctx, w, h){
+  ctx.clearRect(0,0,w,h);
+}
+
+function drawPieChart(canvas, data){
+  // data: [{label, value}]
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  clearCanvas(ctx, w, h);
+
+  const total = data.reduce((s,d)=>s+d.value,0);
+  if(total <= 0){
+    ctx.font = "14px system-ui";
+    ctx.fillText("Sem dados.", 10, 24);
+    return;
+  }
+
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w,h) * 0.35;
+
+  let start = -Math.PI/2;
+  for(let i=0;i<data.length;i++){
+    const slice = (data[i].value/total) * Math.PI*2;
+    const end = start + slice;
+
+    // cor determinística (HSL por índice)
+    const hue = (i * 47) % 360;
+    ctx.fillStyle = `hsl(${hue} 70% 55%)`;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, end);
+    ctx.closePath();
+    ctx.fill();
+
+    start = end;
+  }
+
+  // centro (buraco leve)
+  ctx.fillStyle = "rgba(0,0,0,0.20)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r*0.55, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = "bold 14px system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText("Saídas", cx, cy-4);
+  ctx.font = "12px system-ui";
+  ctx.fillText(moneyFmt(total, state.cfg.currency), cx, cy+14);
+}
+
+function drawBarChart(canvas, labels, values){
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  clearCanvas(ctx, w, h);
+
+  if(values.length === 0){
+    ctx.font = "14px system-ui";
+    ctx.fillText("Sem dados.", 10, 24);
+    return;
+  }
+
+  const maxAbs = Math.max(...values.map(v => Math.abs(v)), 1);
+  const padding = 36;
+  const chartW = w - padding*2;
+  const chartH = h - padding*2;
+  const baseY = padding + chartH/2;
+
+  // eixo
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.beginPath();
+  ctx.moveTo(padding, baseY);
+  ctx.lineTo(padding + chartW, baseY);
+  ctx.stroke();
+
+  const barW = chartW / values.length * 0.7;
+  const gap = chartW / values.length * 0.3;
+
+  for(let i=0;i<values.length;i++){
+    const v = values[i];
+    const x = padding + i*(barW+gap) + gap*0.5;
+    const barH = (Math.abs(v)/maxAbs) * (chartH*0.45);
+
+    // positivo acima, negativo abaixo
+    const y = v >= 0 ? baseY - barH : baseY;
+    ctx.fillStyle = v >= 0 ? "rgba(74,163,255,0.85)" : "rgba(255,91,91,0.85)";
+    ctx.fillRect(x, y, barW, barH);
+
+    // label curto
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.font = "11px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(labels[i].slice(0,10), x + barW/2, h - 14);
+  }
+}
+
+function renderCharts(){
+  const { month } = getCurrentFilters();
+  const txMonth = state.tx.filter(t => monthKey(t.date) === month);
+
+  // Pizza: saídas por categoria
+  const byCat = new Map();
+  for(const t of txMonth){
+    if(t.type !== "expense") continue;
+    const k = t.category || "Sem categoria";
+    byCat.set(k, (byCat.get(k) || 0) + t.amount);
+  }
+  const catArr = Array.from(byCat.entries())
+    .sort((a,b)=> b[1]-a[1])
+    .slice(0,8)
+    .map(([label,value]) => ({ label, value }));
+
+  const canvasPie = document.getElementById("chartPie");
+  if(canvasPie) drawPieChart(canvasPie, catArr);
+
+  // legenda
+  const legend = document.getElementById("chartPieLegend");
+  if(legend){
+    if(catArr.length === 0){
+      legend.textContent = "Sem dados de saídas para o mês.";
+    }else{
+      legend.textContent = catArr.map((d,i)=> {
+        const hue = (i * 47) % 360;
+        return `■ ${d.label}: ${moneyFmt(d.value, state.cfg.currency)} (cor hsl(${hue}))`;
+      }).join(" | ");
+    }
+  }
+
+  // Barras: saldo por conta
+  const labels = state.accounts.map(a => a.name);
+  const values = state.accounts.map(a => accountBalance(a.id));
+  const canvasBars = document.getElementById("chartBars");
+  if(canvasBars) drawBarChart(canvasBars, labels, values);
+}
+
+function renderReportsAndCharts(){
+  renderReports();
+  renderCharts();
 }
 
 /* =========================
@@ -571,7 +734,7 @@ function renderReports(){
 ========================= */
 function renderProjections(){
   const currency = state.cfg.currency;
-  const month = document.getElementById("filterMonth").value;
+  const { month } = getCurrentFilters();
   const tx = state.tx.filter(t => monthKey(t.date) === month);
 
   const expenses = tx.filter(t => t.type === "expense").map(t => t.amount);
@@ -616,7 +779,7 @@ function renderProjections(){
 }
 
 /* =========================
-   CONFIG
+   CONFIG + BACKUP
 ========================= */
 function renderConfig(){
   document.getElementById("cfgCompany").value = state.cfg.company || "";
@@ -631,8 +794,85 @@ function saveConfig(){
   alert("Configurações salvas.");
 }
 
+function exportJson(){
+  const payload = {
+    meta: { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString() },
+    state: deepClone(state)
+  };
+  const filename = `gestao-mpe-backup-${new Date().toISOString().slice(0,10)}.json`;
+  downloadText(filename, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+  const hint = document.getElementById("backupHint");
+  if(hint) hint.textContent = `Backup gerado: ${filename}`;
+}
+
+async function importJsonFile(file){
+  const hint = document.getElementById("backupHint");
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const candidate = data?.state ?? data;
+
+    if(!isValidState(candidate)){
+      // tentar migrar
+      const migrated = migrateAnyToV04(candidate);
+      if(!isValidState(migrated)) throw new Error("JSON inválido ou incompatível.");
+      state = migrated;
+    }else{
+      state = candidate;
+    }
+
+    state.meta = { app:"Gestão MPE", appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION };
+
+    saveState();
+    renderAll();
+    if(hint) hint.textContent = `Backup importado com sucesso (${file.name}).`;
+    alert("Importação concluída.");
+  }catch(err){
+    if(hint) hint.textContent = `Falha ao importar: ${String(err.message || err)}`;
+    alert("Não foi possível importar este arquivo. Verifique se é um backup do Gestão MPE.");
+  }finally{
+    const inp = document.getElementById("fileImportJson");
+    if(inp) inp.value = "";
+  }
+}
+
 /* =========================
-   SEED / WIPE
+   CSV EXPORT (ALL / FILTERED)
+========================= */
+function exportCsvAll(){
+  exportCsvFromTx(state.tx, "gestao-mpe-tudo");
+}
+
+function exportCsvFiltered(){
+  exportCsvFromTx(filteredTx(), "gestao-mpe-filtrado");
+}
+
+function exportCsvFromTx(tx, prefix){
+  const header = ["id","type","date","amount","account","costCenter","category","note"];
+  const rows = [header.join(",")];
+
+  const accById = new Map(state.accounts.map(a => [a.id, a.name]));
+  const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
+
+  for(const t of tx){
+    const row = [
+      t.id,
+      t.type,
+      t.date,
+      String(t.amount),
+      accById.get(t.accountId) || "",
+      costById.get(t.costCenterId) || "",
+      (t.category || "").replaceAll('"','""'),
+      (t.note || "").replaceAll('"','""')
+    ].map(v => `"${String(v)}"`).join(",");
+    rows.push(row);
+  }
+
+  downloadText(`${prefix}-${new Date().toISOString().slice(0,10)}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+}
+
+/* =========================
+   AÇÕES: LANÇAMENTOS + CONTAS
 ========================= */
 function seedData(){
   const today = nowISODate();
@@ -666,19 +906,150 @@ function wipeAll(){
   renderAll();
 }
 
+function addAccount(){
+  const name = (prompt("Nome da conta (ex: Banco PJ, Caixa, Cartão):") || "").trim();
+  if(!name) return;
+
+  const initialRaw = prompt("Saldo inicial (use ponto para decimais). Ex: 1500.50", "0");
+  const initialBalance = Number(initialRaw);
+  if(!isFinite(initialBalance)){
+    alert("Saldo inicial inválido.");
+    return;
+  }
+
+  state.accounts.push({ id: uid(), name, initialBalance });
+  saveState();
+  renderAll();
+}
+
+function editAccount(id){
+  const acc = state.accounts.find(a => a.id === id);
+  if(!acc) return;
+
+  const name = (prompt("Editar nome da conta:", acc.name) || "").trim();
+  if(!name) return;
+
+  const initialRaw = prompt("Editar saldo inicial:", String(acc.initialBalance ?? 0));
+  const initialBalance = Number(initialRaw);
+  if(!isFinite(initialBalance)){
+    alert("Saldo inicial inválido.");
+    return;
+  }
+
+  acc.name = name;
+  acc.initialBalance = initialBalance;
+  saveState();
+  renderAll();
+}
+
+function deleteAccount(id){
+  if(state.accounts.length <= 1){
+    alert("Você precisa ter pelo menos 1 conta.");
+    return;
+  }
+
+  const used = state.tx.some(t => t.accountId === id);
+  if(used){
+    alert("Não é possível excluir: existe lançamento vinculado a esta conta.");
+    return;
+  }
+
+  if(!confirm("Excluir esta conta?")) return;
+  state.accounts = state.accounts.filter(a => a.id !== id);
+  saveState();
+  renderAll();
+}
+
+function addCostCenter(){
+  const name = (prompt("Nome do centro de custo (ex: Operacional, Marketing, Administrativo):") || "").trim();
+  if(!name) return;
+
+  state.costCenters.push({ id: uid(), name });
+  saveState();
+  renderAll();
+}
+
+function renderAccountsPanel(){
+  const box = document.getElementById("accountsPanel");
+  box.innerHTML = "";
+
+  for(const a of state.accounts){
+    const div = document.createElement("div");
+    div.className = "panel";
+    div.innerHTML = `
+      <h3>${a.name}</h3>
+      <div class="mini">Saldo: ${moneyFmt(accountBalance(a.id), state.cfg.currency)}</div>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn" data-action="edit" data-id="${a.id}">Editar</button>
+        <button class="btn danger" data-action="delete" data-id="${a.id}">Excluir</button>
+      </div>
+    `;
+    box.appendChild(div);
+  }
+
+  box.querySelectorAll("button").forEach(btn => {
+    const id = btn.dataset.id;
+    const act = btn.dataset.action;
+    btn.addEventListener("click", () => {
+      if(act === "edit") editAccount(id);
+      if(act === "delete") deleteAccount(id);
+    });
+  });
+}
+
+function renderAccountSelect(){
+  const sel = document.getElementById("txAccount");
+  sel.innerHTML = "";
+  for(const a of state.accounts){
+    const opt = document.createElement("option");
+    opt.value = a.id;
+    opt.textContent = a.name;
+    sel.appendChild(opt);
+  }
+}
+
+function renderCostCenterSelect(){
+  const sel = document.getElementById("txCostCenter");
+  sel.innerHTML = "";
+  for(const c of state.costCenters){
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  }
+}
+
+function deleteTx(id){
+  if(!confirm("Excluir este lançamento?")) return;
+  state.tx = state.tx.filter(t => t.id !== id);
+  saveState();
+  renderAll();
+}
+
 /* =========================
    RENDER ALL
 ========================= */
 function renderAll(){
   buildMonthOptions();
+  buildAccountFilter();
+  buildCostCenterFilter();
+
   renderAccountSelect();
   renderCostCenterSelect();
   renderAccountsPanel();
+
   renderKpis();
   renderTable();
   renderReports();
   renderProjections();
+
   renderConfig();
+
+  // Se estiver na aba relatórios, atualiza gráficos
+  const rel = document.getElementById("view-relatorios");
+  if(rel && !rel.classList.contains("hidden")){
+    renderReportsAndCharts();
+  }
 }
 
 /* =========================
@@ -728,11 +1099,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Filters
   document.getElementById("filterMonth").addEventListener("change", renderAll);
   document.getElementById("filterType").addEventListener("change", renderAll);
+  document.getElementById("filterAccount").addEventListener("change", renderAll);
+  document.getElementById("filterCostCenter").addEventListener("change", renderAll);
 
   // Buttons
   document.getElementById("btnSeed").addEventListener("click", seedData);
   document.getElementById("btnWipe").addEventListener("click", wipeAll);
-  document.getElementById("btnExportCsv").addEventListener("click", exportCsv);
+
+  document.getElementById("btnExportCsvAll").addEventListener("click", exportCsvAll);
+  document.getElementById("btnExportCsvFiltered").addEventListener("click", exportCsvFiltered);
 
   document.getElementById("btnSaveCfg").addEventListener("click", saveConfig);
 
@@ -743,18 +1118,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.getElementById("btnAddAccount").addEventListener("click", addAccount);
-
-  document.getElementById("btnAddCostCenter").addEventListener("click", () => {
-    const name = (prompt("Nome do centro de custo:") || "").trim();
-    if(!name) return;
-    state.costCenters.push({ id: uid(), name });
-    saveState();
-    renderAll();
-  });
-
-  // Clique duplo no painel de centro de custo para excluir (sem UI extra por enquanto)
-  // (manter simples e incremental: exclusão completa será refinada se você pedir)
-  // -> por enquanto não expomos botão de excluir centro na UI principal.
+  document.getElementById("btnAddCostCenter").addEventListener("click", addCostCenter);
 
   renderAll();
 });
