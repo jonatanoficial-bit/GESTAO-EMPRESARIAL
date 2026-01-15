@@ -165,13 +165,13 @@ input, select{
 
 .row{ display:flex; align-items:center; gap: 10px; }
 .space{ justify-content: space-between; }
-.filters{ display:flex; gap: 8px; }
+.filters{ display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 .table-wrap{ overflow:auto; border-radius: 14px; border: 1px solid var(--border); }
 .table{
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 860px;
 }
 .table th, .table td{
   padding: 10px 10px;
@@ -204,6 +204,14 @@ label.filelike{
 }
 label.filelike input[type="file"]{
   display:none;
+}
+
+canvas{
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
 }
 
 @media (min-width: 760px){
