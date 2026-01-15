@@ -1,10 +1,10 @@
-// Gestão MPE — v0.4 (Etapa 4)
-// Relatórios avançados + Gráficos (Canvas) + Filtros por conta/centro + CSV filtrado
+// Gestão MPE — v0.5 (Etapa 5)
+// Relatório anual + tendência mensal + importação CSV + insights (regras)
 // Offline-first | Mobile-first | Incremental | Sem suposições arriscadas
 
-const LS_KEY = "gmpe_v04_state";
-const APP_VERSION = "0.4";
-const SCHEMA_VERSION = 4;
+const LS_KEY = "gmpe_v05_state";
+const APP_VERSION = "0.5";
+const SCHEMA_VERSION = 5;
 
 /* =========================
    UTILIDADES
@@ -23,6 +23,10 @@ function monthKey(dateStr){
   return (dateStr || "").slice(0,7);
 }
 
+function yearKey(dateStr){
+  return (dateStr || "").slice(0,4);
+}
+
 function moneyFmt(value, currency="BRL"){
   try{
     return new Intl.NumberFormat("pt-BR", { style:"currency", currency }).format(value);
@@ -35,6 +39,11 @@ function deepClone(obj){
   return JSON.parse(JSON.stringify(obj));
 }
 
+function safeNumber(n){
+  const v = Number(n);
+  return isFinite(v) ? v : 0;
+}
+
 function downloadText(filename, text, mime="text/plain;charset=utf-8"){
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -45,11 +54,6 @@ function downloadText(filename, text, mime="text/plain;charset=utf-8"){
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-function safeNumber(n){
-  const v = Number(n);
-  return isFinite(v) ? v : 0;
 }
 
 /* =========================
@@ -119,15 +123,15 @@ let state = loadState();
 function loadState(){
   const raw = localStorage.getItem(LS_KEY);
 
-  // Migração: se não houver gmpe_v04_state, tentar ler chaves antigas e migrar
+  // Migração: se não houver gmpe_v05_state, tenta chaves anteriores
   if(!raw){
-    const legacyKeys = ["gmpe_v03_state", "gmpe_v02_state", "gmpe_v01_state"];
+    const legacyKeys = ["gmpe_v04_state","gmpe_v03_state","gmpe_v02_state","gmpe_v01_state"];
     for(const k of legacyKeys){
       const r = localStorage.getItem(k);
       if(!r) continue;
       try{
         const legacy = JSON.parse(r);
-        const migrated = migrateAnyToV04(legacy);
+        const migrated = migrateAnyToV05(legacy);
         if(isValidState(migrated)){
           localStorage.setItem(LS_KEY, JSON.stringify(migrated));
           return migrated;
@@ -140,8 +144,7 @@ function loadState(){
   try{
     const parsed = JSON.parse(raw);
     if(!isValidState(parsed)){
-      // tentar migrar mesmo assim
-      const migrated = migrateAnyToV04(parsed);
+      const migrated = migrateAnyToV05(parsed);
       if(isValidState(migrated)) return migrated;
       return defaultState();
     }
@@ -151,8 +154,7 @@ function loadState(){
   }
 }
 
-function migrateAnyToV04(any){
-  // Aceita estados antigos (com ou sem accounts/costCenters) e normaliza para v0.4
+function migrateAnyToV05(any){
   const base = defaultState();
 
   const cfg = any?.cfg || {};
@@ -218,14 +220,15 @@ function switchView(name){
   document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
   document.querySelector(`#view-${name}`).classList.remove("hidden");
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === name));
-  // Re-render gráficos quando entrar em relatórios (para garantir tamanho correto)
+
   if(name === "relatorios"){
     renderReportsAndCharts();
+    renderYearSection();
   }
 }
 
 /* =========================
-   DADOS / KPIs / FILTROS
+   FILTROS (MÊS) + FILTROS (ANO)
 ========================= */
 function currentMonth(){
   return monthKey(nowISODate());
@@ -289,6 +292,46 @@ function buildCostCenterFilter(){
   if(!exists) sel.value = "all";
 }
 
+function buildYearOptions(){
+  const years = new Set(state.tx.map(t => yearKey(t.date)).filter(Boolean));
+  years.add(yearKey(nowISODate()));
+  const arr = Array.from(years).sort().reverse();
+
+  const sel = document.getElementById("filterYear");
+  sel.innerHTML = "";
+  for(const y of arr){
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = y;
+    sel.appendChild(opt);
+  }
+
+  if(!sel.value) sel.value = yearKey(nowISODate());
+  if(!arr.includes(sel.value)) sel.value = yearKey(nowISODate());
+}
+
+function getCurrentFilters(){
+  const month = document.getElementById("filterMonth").value;
+  const type = document.getElementById("filterType").value;
+  const account = document.getElementById("filterAccount").value;
+  const cost = document.getElementById("filterCostCenter").value;
+  return { month, type, account, cost };
+}
+
+function filteredTx(){
+  const { month, type, account, cost } = getCurrentFilters();
+  let tx = state.tx.slice();
+  tx = tx.filter(t => monthKey(t.date) === month);
+  if(type !== "all") tx = tx.filter(t => t.type === type);
+  if(account !== "all") tx = tx.filter(t => t.accountId === account);
+  if(cost !== "all") tx = tx.filter(t => t.costCenterId === cost);
+  tx.sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+  return tx;
+}
+
+/* =========================
+   CÁLCULOS
+========================= */
 function totalsForMonth(month){
   const tx = state.tx.filter(t => monthKey(t.date) === month);
   const income = tx.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
@@ -313,26 +356,6 @@ function accountBalance(accountId){
   return total;
 }
 
-function getCurrentFilters(){
-  const month = document.getElementById("filterMonth").value;
-  const type = document.getElementById("filterType").value;
-  const account = document.getElementById("filterAccount").value;
-  const cost = document.getElementById("filterCostCenter").value;
-  return { month, type, account, cost };
-}
-
-function filteredTx(){
-  const { month, type, account, cost } = getCurrentFilters();
-  let tx = state.tx.slice();
-  tx = tx.filter(t => monthKey(t.date) === month);
-  if(type !== "all") tx = tx.filter(t => t.type === type);
-  if(account !== "all") tx = tx.filter(t => t.accountId === account);
-  if(cost !== "all") tx = tx.filter(t => t.costCenterId === cost);
-  // ordenado
-  tx.sort((a,b) => (b.date || "").localeCompare(a.date || ""));
-  return tx;
-}
-
 function renderKpis(){
   const currency = state.cfg.currency;
   const { month } = getCurrentFilters();
@@ -344,7 +367,7 @@ function renderKpis(){
 }
 
 /* =========================
-   CONTAS + CENTROS
+   SELECTS (FORM)
 ========================= */
 function renderAccountSelect(){
   const sel = document.getElementById("txAccount");
@@ -368,6 +391,9 @@ function renderCostCenterSelect(){
   }
 }
 
+/* =========================
+   CONTAS/PAINEL
+========================= */
 function renderAccountsPanel(){
   const box = document.getElementById("accountsPanel");
   box.innerHTML = "";
@@ -460,7 +486,7 @@ function addCostCenter(){
 }
 
 /* =========================
-   TABELA DE LANÇAMENTOS
+   TABELA (LANÇAMENTOS)
 ========================= */
 function renderTable(){
   const tbody = document.getElementById("txTable");
@@ -468,7 +494,6 @@ function renderTable(){
 
   const accById = new Map(state.accounts.map(a => [a.id, a.name]));
   const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
-
   const tx = filteredTx();
 
   if(tx.length === 0){
@@ -479,41 +504,16 @@ function renderTable(){
 
   for(const t of tx){
     const tr = document.createElement("tr");
-
-    const tdDate = document.createElement("td");
-    tdDate.textContent = t.date || "";
-    tr.appendChild(tdDate);
-
-    const tdType = document.createElement("td");
-    tdType.textContent = t.type === "income" ? "Entrada" : "Saída";
-    tr.appendChild(tdType);
-
-    const tdAcc = document.createElement("td");
-    tdAcc.textContent = accById.get(t.accountId) || "—";
-    tr.appendChild(tdAcc);
-
-    const tdCost = document.createElement("td");
-    tdCost.textContent = costById.get(t.costCenterId) || "—";
-    tr.appendChild(tdCost);
-
-    const tdCat = document.createElement("td");
-    tdCat.textContent = t.category || "";
-    tr.appendChild(tdCat);
-
-    const tdAmt = document.createElement("td");
-    tdAmt.className = "right";
-    tdAmt.textContent = moneyFmt(t.amount, state.cfg.currency);
-    tr.appendChild(tdAmt);
-
-    const tdAct = document.createElement("td");
-    tdAct.className = "right";
-    const del = document.createElement("button");
-    del.className = "btn danger";
-    del.textContent = "Excluir";
-    del.addEventListener("click", () => deleteTx(t.id));
-    tdAct.appendChild(del);
-    tr.appendChild(tdAct);
-
+    tr.innerHTML = `
+      <td>${t.date || ""}</td>
+      <td>${t.type === "income" ? "Entrada" : "Saída"}</td>
+      <td>${accById.get(t.accountId) || "—"}</td>
+      <td>${costById.get(t.costCenterId) || "—"}</td>
+      <td>${t.category || ""}</td>
+      <td class="right">${moneyFmt(t.amount, state.cfg.currency)}</td>
+      <td class="right"><button class="btn danger" data-id="${t.id}">Excluir</button></td>
+    `;
+    tr.querySelector("button").addEventListener("click", () => deleteTx(t.id));
     tbody.appendChild(tr);
   }
 }
@@ -526,7 +526,7 @@ function deleteTx(id){
 }
 
 /* =========================
-   RELATÓRIOS (TEXTO)
+   RELATÓRIOS (MÊS)
 ========================= */
 function reportMonthSummary(month){
   const currency = state.cfg.currency;
@@ -556,10 +556,11 @@ function reportSignedByKey(tx, keyGetter){
   return arr.map(([k,v]) => `${k}: ${moneyFmt(v, currency)}`).join("\n");
 }
 
-function reportTopExpenses(tx){
+function reportTopExpenses(txMonth){
   const currency = state.cfg.currency;
-  const exp = tx.filter(t => t.type === "expense").slice().sort((a,b)=> b.amount - a.amount).slice(0,5);
+  const exp = txMonth.filter(t => t.type === "expense").slice().sort((a,b)=> b.amount - a.amount).slice(0,5);
   if(exp.length === 0) return "Sem dados.";
+
   const accById = new Map(state.accounts.map(a => [a.id, a.name]));
   const costById = new Map(state.costCenters.map(c => [c.id, c.name]));
 
@@ -586,14 +587,13 @@ function renderReports(){
 }
 
 /* =========================
-   GRÁFICOS (CANVAS)
+   GRÁFICOS (MÊS) + GRÁFICO (ANO)
 ========================= */
 function clearCanvas(ctx, w, h){
   ctx.clearRect(0,0,w,h);
 }
 
 function drawPieChart(canvas, data){
-  // data: [{label, value}]
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
   clearCanvas(ctx, w, h);
@@ -601,6 +601,7 @@ function drawPieChart(canvas, data){
   const total = data.reduce((s,d)=>s+d.value,0);
   if(total <= 0){
     ctx.font = "14px system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillText("Sem dados.", 10, 24);
     return;
   }
@@ -612,8 +613,6 @@ function drawPieChart(canvas, data){
   for(let i=0;i<data.length;i++){
     const slice = (data[i].value/total) * Math.PI*2;
     const end = start + slice;
-
-    // cor determinística (HSL por índice)
     const hue = (i * 47) % 360;
     ctx.fillStyle = `hsl(${hue} 70% 55%)`;
 
@@ -626,7 +625,6 @@ function drawPieChart(canvas, data){
     start = end;
   }
 
-  // centro (buraco leve)
   ctx.fillStyle = "rgba(0,0,0,0.20)";
   ctx.beginPath();
   ctx.arc(cx, cy, r*0.55, 0, Math.PI*2);
@@ -647,6 +645,7 @@ function drawBarChart(canvas, labels, values){
 
   if(values.length === 0){
     ctx.font = "14px system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillText("Sem dados.", 10, 24);
     return;
   }
@@ -657,27 +656,24 @@ function drawBarChart(canvas, labels, values){
   const chartH = h - padding*2;
   const baseY = padding + chartH/2;
 
-  // eixo
   ctx.strokeStyle = "rgba(255,255,255,0.25)";
   ctx.beginPath();
   ctx.moveTo(padding, baseY);
   ctx.lineTo(padding + chartW, baseY);
   ctx.stroke();
 
-  const barW = chartW / values.length * 0.7;
-  const gap = chartW / values.length * 0.3;
+  const slot = chartW / values.length;
+  const barW = slot * 0.65;
 
   for(let i=0;i<values.length;i++){
     const v = values[i];
-    const x = padding + i*(barW+gap) + gap*0.5;
+    const x = padding + i*slot + (slot-barW)/2;
     const barH = (Math.abs(v)/maxAbs) * (chartH*0.45);
 
-    // positivo acima, negativo abaixo
     const y = v >= 0 ? baseY - barH : baseY;
     ctx.fillStyle = v >= 0 ? "rgba(74,163,255,0.85)" : "rgba(255,91,91,0.85)";
     ctx.fillRect(x, y, barW, barH);
 
-    // label curto
     ctx.fillStyle = "rgba(255,255,255,0.75)";
     ctx.font = "11px system-ui";
     ctx.textAlign = "center";
@@ -685,11 +681,83 @@ function drawBarChart(canvas, labels, values){
   }
 }
 
+function drawLineChart(canvas, points){
+  // points: [{xLabel, y}]
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  clearCanvas(ctx, w, h);
+
+  if(!points.length){
+    ctx.font = "14px system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillText("Sem dados.", 10, 24);
+    return;
+  }
+
+  const padding = 38;
+  const chartW = w - padding*2;
+  const chartH = h - padding*2;
+
+  const ys = points.map(p => p.y);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const span = Math.max(maxY - minY, 1);
+
+  // grid (3 linhas)
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  for(let i=0;i<=3;i++){
+    const y = padding + (chartH * i/3);
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(padding + chartW, y);
+    ctx.stroke();
+  }
+
+  // path
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(74,163,255,0.95)";
+  ctx.beginPath();
+
+  points.forEach((p, i) => {
+    const x = padding + chartW * (points.length === 1 ? 0.5 : i/(points.length-1));
+    const y = padding + chartH * (1 - (p.y - minY)/span);
+    if(i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  ctx.stroke();
+
+  // pontos + labels
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "center";
+
+  points.forEach((p, i) => {
+    const x = padding + chartW * (points.length === 1 ? 0.5 : i/(points.length-1));
+    const y = padding + chartH * (1 - (p.y - minY)/span);
+
+    ctx.fillStyle = "rgba(74,163,255,1)";
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.70)";
+    ctx.fillText(p.xLabel, x, h - 14);
+  });
+
+  // texto min/max
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.fillText(moneyFmt(maxY, state.cfg.currency), padding, padding - 10);
+  ctx.textAlign = "left";
+  ctx.fillText(moneyFmt(minY, state.cfg.currency), padding, padding + chartH + 22);
+}
+
 function renderCharts(){
   const { month } = getCurrentFilters();
   const txMonth = state.tx.filter(t => monthKey(t.date) === month);
 
-  // Pizza: saídas por categoria
+  // Pizza: saídas por categoria (top 8)
   const byCat = new Map();
   for(const t of txMonth){
     if(t.type !== "expense") continue;
@@ -704,7 +772,6 @@ function renderCharts(){
   const canvasPie = document.getElementById("chartPie");
   if(canvasPie) drawPieChart(canvasPie, catArr);
 
-  // legenda
   const legend = document.getElementById("chartPieLegend");
   if(legend){
     if(catArr.length === 0){
@@ -712,7 +779,7 @@ function renderCharts(){
     }else{
       legend.textContent = catArr.map((d,i)=> {
         const hue = (i * 47) % 360;
-        return `■ ${d.label}: ${moneyFmt(d.value, state.cfg.currency)} (cor hsl(${hue}))`;
+        return `■ ${d.label}: ${moneyFmt(d.value, state.cfg.currency)} (hsl(${hue}))`;
       }).join(" | ");
     }
   }
@@ -730,7 +797,7 @@ function renderReportsAndCharts(){
 }
 
 /* =========================
-   PROJEÇÕES (MVP)
+   PROJEÇÕES (MVP - MÊS)
 ========================= */
 function renderProjections(){
   const currency = state.cfg.currency;
@@ -751,10 +818,11 @@ function renderProjections(){
 
   const tips = [];
   const bal = balanceOverall();
+
   if(avgExpense > 0 && bal < avgExpense){
-    tips.push("Seu saldo geral está abaixo da meta de 30 dias de saídas. Considere reduzir custos ou aumentar receita.");
+    tips.push("Saldo geral abaixo da meta de 30 dias de saídas. Reduza custos ou aumente receita.");
   }else if(avgExpense > 0){
-    tips.push("Saldo geral dentro/ acima da meta de 30 dias. Próximo passo: construir reserva de 1–3 meses.");
+    tips.push("Saldo geral ok para 30 dias. Próximo passo: construir reserva de 1–3 meses.");
   }else{
     tips.push("Cadastre algumas saídas para gerar projeções mais úteis.");
   }
@@ -763,10 +831,10 @@ function renderProjections(){
   const expense = tx.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
 
   if(income > 0 && expense > income){
-    tips.push("No mês selecionado, suas saídas superaram suas entradas. Investigue categorias/centros de maior impacto.");
+    tips.push("No mês selecionado, as saídas superaram as entradas. Verifique categorias e centros de maior impacto.");
   }
   if(tx.length < 5){
-    tips.push("Mais lançamentos = relatórios e projeções melhores. Tente registrar diariamente por 1 semana.");
+    tips.push("Mais lançamentos = relatórios e insights melhores. Tente registrar diariamente por 1 semana.");
   }
 
   const ul = document.getElementById("projTips");
@@ -779,7 +847,7 @@ function renderProjections(){
 }
 
 /* =========================
-   CONFIG + BACKUP
+   CONFIG + BACKUP + IMPORT CSV
 ========================= */
 function renderConfig(){
   document.getElementById("cfgCompany").value = state.cfg.company || "";
@@ -813,8 +881,7 @@ async function importJsonFile(file){
     const candidate = data?.state ?? data;
 
     if(!isValidState(candidate)){
-      // tentar migrar
-      const migrated = migrateAnyToV04(candidate);
+      const migrated = migrateAnyToV05(candidate);
       if(!isValidState(migrated)) throw new Error("JSON inválido ou incompatível.");
       state = migrated;
     }else{
@@ -836,17 +903,147 @@ async function importJsonFile(file){
   }
 }
 
+function parseCsvLine(line){
+  // Parser simples com suporte a aspas
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(ch === '"' ){
+      if(inQuotes && line[i+1] === '"'){ // escape ""
+        cur += '"';
+        i++;
+      }else{
+        inQuotes = !inQuotes;
+      }
+    }else if(ch === ',' && !inQuotes){
+      out.push(cur);
+      cur = "";
+    }else{
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function normalizeHeader(h){
+  return String(h || "").trim().toLowerCase();
+}
+
+function ensureAccountByName(name){
+  const n = String(name || "").trim();
+  if(!n) return state.accounts[0].id;
+  const found = state.accounts.find(a => a.name.toLowerCase() === n.toLowerCase());
+  if(found) return found.id;
+  const id = uid();
+  state.accounts.push({ id, name: n, initialBalance: 0 });
+  return id;
+}
+
+function ensureCostCenterByName(name){
+  const n = String(name || "").trim();
+  if(!n) return state.costCenters[0].id;
+  const found = state.costCenters.find(c => c.name.toLowerCase() === n.toLowerCase());
+  if(found) return found.id;
+  const id = uid();
+  state.costCenters.push({ id, name: n });
+  return id;
+}
+
+async function importCsvFile(file){
+  const hint = document.getElementById("csvHint");
+  try{
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    if(lines.length < 2) throw new Error("CSV vazio ou inválido.");
+
+    const header = parseCsvLine(lines[0]).map(normalizeHeader);
+
+    // Esperado:
+    // id,type,date,amount,account,costCenter,category,note
+    const idx = {
+      id: header.indexOf("id"),
+      type: header.indexOf("type"),
+      date: header.indexOf("date"),
+      amount: header.indexOf("amount"),
+      account: header.indexOf("account"),
+      costCenter: header.indexOf("costcenter"),
+      category: header.indexOf("category"),
+      note: header.indexOf("note")
+    };
+
+    // mínimo viável: type,date,amount
+    if(idx.type < 0 || idx.date < 0 || idx.amount < 0){
+      throw new Error("Cabeçalho inválido. Use o CSV exportado pelo app.");
+    }
+
+    let imported = 0;
+    let skipped = 0;
+
+    for(let i=1;i<lines.length;i++){
+      const cols = parseCsvLine(lines[i]);
+      const type = String(cols[idx.type] || "").trim().toLowerCase();
+      const date = String(cols[idx.date] || "").trim();
+      const amount = safeNumber(String(cols[idx.amount] || "").trim().replace(",", "."));
+      const accountName = idx.account >= 0 ? cols[idx.account] : "";
+      const costName = idx.costCenter >= 0 ? cols[idx.costCenter] : "";
+      const category = idx.category >= 0 ? String(cols[idx.category] || "").trim() : "Sem categoria";
+      const note = idx.note >= 0 ? String(cols[idx.note] || "").trim() : "";
+      const idRaw = idx.id >= 0 ? String(cols[idx.id] || "").trim() : "";
+
+      const txType = (type === "expense" || type === "saida" || type === "saída") ? "expense" : "income";
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(amount >= 0)){
+        skipped++;
+        continue;
+      }
+
+      const accountId = ensureAccountByName(accountName);
+      const costCenterId = ensureCostCenterByName(costName);
+
+      const txId = idRaw ? idRaw : uid();
+
+      // evitar duplicar se id já existe
+      if(state.tx.some(t => t.id === txId)){
+        skipped++;
+        continue;
+      }
+
+      state.tx.push({
+        id: txId,
+        type: txType,
+        date,
+        amount,
+        accountId,
+        costCenterId,
+        category: category || "Sem categoria",
+        note: note || ""
+      });
+
+      imported++;
+    }
+
+    // ordena desc por data e salva
+    state.tx.sort((a,b)=> (b.date || "").localeCompare(a.date || ""));
+    saveState();
+    renderAll();
+
+    if(hint) hint.textContent = `Importação concluída: ${imported} importado(s), ${skipped} ignorado(s).`;
+    alert("CSV importado com sucesso.");
+  }catch(err){
+    if(hint) hint.textContent = `Falha ao importar CSV: ${String(err.message || err)}`;
+    alert("Não foi possível importar este CSV. Verifique o formato.");
+  }finally{
+    const inp = document.getElementById("fileImportCsv");
+    if(inp) inp.value = "";
+  }
+}
+
 /* =========================
-   CSV EXPORT (ALL / FILTERED)
+   CSV EXPORT
 ========================= */
-function exportCsvAll(){
-  exportCsvFromTx(state.tx, "gestao-mpe-tudo");
-}
-
-function exportCsvFiltered(){
-  exportCsvFromTx(filteredTx(), "gestao-mpe-filtrado");
-}
-
 function exportCsvFromTx(tx, prefix){
   const header = ["id","type","date","amount","account","costCenter","category","note"];
   const rows = [header.join(",")];
@@ -871,8 +1068,16 @@ function exportCsvFromTx(tx, prefix){
   downloadText(`${prefix}-${new Date().toISOString().slice(0,10)}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
 }
 
+function exportCsvAll(){
+  exportCsvFromTx(state.tx, "gestao-mpe-tudo");
+}
+
+function exportCsvFiltered(){
+  exportCsvFromTx(filteredTx(), "gestao-mpe-filtrado");
+}
+
 /* =========================
-   AÇÕES: LANÇAMENTOS + CONTAS
+   SEED / WIPE
 ========================= */
 function seedData(){
   const today = nowISODate();
@@ -906,124 +1111,150 @@ function wipeAll(){
   renderAll();
 }
 
-function addAccount(){
-  const name = (prompt("Nome da conta (ex: Banco PJ, Caixa, Cartão):") || "").trim();
-  if(!name) return;
-
-  const initialRaw = prompt("Saldo inicial (use ponto para decimais). Ex: 1500.50", "0");
-  const initialBalance = Number(initialRaw);
-  if(!isFinite(initialBalance)){
-    alert("Saldo inicial inválido.");
-    return;
+/* =========================
+   RELATÓRIO ANUAL + INSIGHTS
+========================= */
+function monthsOfYear(year){
+  const out = [];
+  for(let m=1;m<=12;m++){
+    out.push(`${year}-${String(m).padStart(2,"0")}`);
   }
-
-  state.accounts.push({ id: uid(), name, initialBalance });
-  saveState();
-  renderAll();
+  return out;
 }
 
-function editAccount(id){
-  const acc = state.accounts.find(a => a.id === id);
-  if(!acc) return;
-
-  const name = (prompt("Editar nome da conta:", acc.name) || "").trim();
-  if(!name) return;
-
-  const initialRaw = prompt("Editar saldo inicial:", String(acc.initialBalance ?? 0));
-  const initialBalance = Number(initialRaw);
-  if(!isFinite(initialBalance)){
-    alert("Saldo inicial inválido.");
-    return;
-  }
-
-  acc.name = name;
-  acc.initialBalance = initialBalance;
-  saveState();
-  renderAll();
+function totalsForMonthInYear(year, month){
+  const tx = state.tx.filter(t => monthKey(t.date) === month && yearKey(t.date) === year);
+  const income = tx.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
+  const expense = tx.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
+  return { income, expense, net: income - expense };
 }
 
-function deleteAccount(id){
-  if(state.accounts.length <= 1){
-    alert("Você precisa ter pelo menos 1 conta.");
-    return;
-  }
-
-  const used = state.tx.some(t => t.accountId === id);
-  if(used){
-    alert("Não é possível excluir: existe lançamento vinculado a esta conta.");
-    return;
-  }
-
-  if(!confirm("Excluir esta conta?")) return;
-  state.accounts = state.accounts.filter(a => a.id !== id);
-  saveState();
-  renderAll();
+function yearTotals(year){
+  const tx = state.tx.filter(t => yearKey(t.date) === year);
+  const income = tx.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
+  const expense = tx.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
+  return { income, expense, net: income - expense, tx };
 }
 
-function addCostCenter(){
-  const name = (prompt("Nome do centro de custo (ex: Operacional, Marketing, Administrativo):") || "").trim();
-  if(!name) return;
+function yearCategoryRanking(year){
+  const currency = state.cfg.currency;
+  const { tx } = yearTotals(year);
 
-  state.costCenters.push({ id: uid(), name });
-  saveState();
-  renderAll();
-}
-
-function renderAccountsPanel(){
-  const box = document.getElementById("accountsPanel");
-  box.innerHTML = "";
-
-  for(const a of state.accounts){
-    const div = document.createElement("div");
-    div.className = "panel";
-    div.innerHTML = `
-      <h3>${a.name}</h3>
-      <div class="mini">Saldo: ${moneyFmt(accountBalance(a.id), state.cfg.currency)}</div>
-      <div class="actions" style="margin-top:10px">
-        <button class="btn" data-action="edit" data-id="${a.id}">Editar</button>
-        <button class="btn danger" data-action="delete" data-id="${a.id}">Excluir</button>
-      </div>
-    `;
-    box.appendChild(div);
+  const m = new Map();
+  for(const t of tx){
+    const key = t.category || "Sem categoria";
+    const signed = t.type === "income" ? t.amount : -t.amount;
+    m.set(key, (m.get(key) || 0) + signed);
   }
 
-  box.querySelectorAll("button").forEach(btn => {
-    const id = btn.dataset.id;
-    const act = btn.dataset.action;
-    btn.addEventListener("click", () => {
-      if(act === "edit") editAccount(id);
-      if(act === "delete") deleteAccount(id);
-    });
+  const arr = Array.from(m.entries()).sort((a,b)=> Math.abs(b[1]) - Math.abs(a[1]));
+  if(!arr.length) return "Sem dados.";
+
+  return arr.slice(0,20).map(([k,v]) => `${k}: ${moneyFmt(v, currency)}`).join("\n");
+}
+
+function yearInsights(year){
+  const currency = state.cfg.currency;
+  const { income, expense, net, tx } = yearTotals(year);
+
+  // 1) runway simples = saldo geral / média mensal de saídas (do ano)
+  const months = monthsOfYear(year);
+  const monthExpenses = months.map(m => {
+    const t = state.tx.filter(x => monthKey(x.date) === m && x.type === "expense");
+    return t.reduce((s,x)=>s+x.amount,0);
   });
-}
+  const activeMonths = monthExpenses.filter(v=>v>0);
+  const avgMonthlyExpense = activeMonths.length ? activeMonths.reduce((s,v)=>s+v,0)/activeMonths.length : 0;
 
-function renderAccountSelect(){
-  const sel = document.getElementById("txAccount");
-  sel.innerHTML = "";
-  for(const a of state.accounts){
-    const opt = document.createElement("option");
-    opt.value = a.id;
-    opt.textContent = a.name;
-    sel.appendChild(opt);
+  const bal = balanceOverall();
+  const runwayMonths = avgMonthlyExpense > 0 ? (bal / avgMonthlyExpense) : null;
+
+  // 2) concentração de gastos: % top categoria de despesas
+  const expByCat = new Map();
+  for(const t of tx){
+    if(t.type !== "expense") continue;
+    const k = t.category || "Sem categoria";
+    expByCat.set(k, (expByCat.get(k)||0) + t.amount);
   }
-}
+  const expTotal = Array.from(expByCat.values()).reduce((s,v)=>s+v,0);
+  const topExp = Array.from(expByCat.entries()).sort((a,b)=>b[1]-a[1])[0];
+  const topShare = (expTotal>0 && topExp) ? (topExp[1]/expTotal) : 0;
 
-function renderCostCenterSelect(){
-  const sel = document.getElementById("txCostCenter");
-  sel.innerHTML = "";
-  for(const c of state.costCenters){
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = c.name;
-    sel.appendChild(opt);
+  // 3) meses negativos
+  const negatives = months.map(m => ({ m, net: totalsForMonth(m).net }))
+    .filter(x => x.net < 0)
+    .length;
+
+  const lines = [];
+  lines.push(`Ano: ${year}`);
+  lines.push(`Entradas:  ${moneyFmt(income, currency)}`);
+  lines.push(`Saídas:    ${moneyFmt(expense, currency)}`);
+  lines.push(`Resultado: ${moneyFmt(net, currency)}`);
+  lines.push("");
+
+  if(runwayMonths === null){
+    lines.push("Runway: sem saídas suficientes para calcular (cadastre despesas).");
+  }else{
+    lines.push(`Runway (aprox): ${runwayMonths.toFixed(1)} mês(es) mantendo o gasto médio do ano.`);
+    if(runwayMonths < 2) lines.push("Alerta: runway abaixo de 2 meses. Priorize caixa e corte custos.");
   }
+
+  if(topExp){
+    lines.push(`Concentração: Top despesa = "${topExp[0]}" (${(topShare*100).toFixed(1)}% das despesas do ano).`);
+    if(topShare >= 0.35) lines.push("Atenção: alta dependência em uma categoria. Negocie/otimize esse item.");
+  }
+
+  lines.push(`Meses com resultado negativo: ${negatives}/12.`);
+
+  // 4) recorrência simples: mesma categoria aparece em >= 6 meses com despesa
+  const catMonths = new Map(); // cat -> set(month)
+  for(const t of tx){
+    if(t.type !== "expense") continue;
+    const m = monthKey(t.date);
+    const k = t.category || "Sem categoria";
+    if(!catMonths.has(k)) catMonths.set(k, new Set());
+    catMonths.get(k).add(m);
+  }
+  const recurring = Array.from(catMonths.entries())
+    .map(([k,set]) => ({ k, count: set.size }))
+    .sort((a,b)=> b.count - a.count)
+    .filter(x => x.count >= 6)
+    .slice(0,3);
+
+  if(recurring.length){
+    lines.push("Recorrência (despesas frequentes):");
+    recurring.forEach(r => lines.push(`- ${r.k} em ${r.count} mês(es)`));
+  }
+
+  return lines.join("\n");
 }
 
-function deleteTx(id){
-  if(!confirm("Excluir este lançamento?")) return;
-  state.tx = state.tx.filter(t => t.id !== id);
-  saveState();
-  renderAll();
+function renderYearSection(){
+  buildYearOptions();
+  const year = document.getElementById("filterYear").value;
+
+  const currency = state.cfg.currency;
+  const { income, expense, net } = yearTotals(year);
+
+  document.getElementById("yearSummary").textContent = [
+    `Ano: ${year}`,
+    `Entradas:  ${moneyFmt(income, currency)}`,
+    `Saídas:    ${moneyFmt(expense, currency)}`,
+    `Resultado: ${moneyFmt(net, currency)}`
+  ].join("\n");
+
+  document.getElementById("yearByCategory").textContent = yearCategoryRanking(year);
+  document.getElementById("yearInsights").textContent = yearInsights(year);
+
+  // gráfico tendência (net por mês)
+  const months = monthsOfYear(year);
+  const points = months.map(m => {
+    const { net } = totalsForMonth(m);
+    return { xLabel: m.slice(5,7), y: net };
+  });
+
+  const canvasTrend = document.getElementById("chartTrend");
+  if(canvasTrend) drawLineChart(canvasTrend, points);
 }
 
 /* =========================
@@ -1042,13 +1273,13 @@ function renderAll(){
   renderTable();
   renderReports();
   renderProjections();
-
   renderConfig();
 
-  // Se estiver na aba relatórios, atualiza gráficos
+  // Se estiver na aba relatórios, atualiza gráficos/ano
   const rel = document.getElementById("view-relatorios");
   if(rel && !rel.classList.contains("hidden")){
     renderReportsAndCharts();
+    renderYearSection();
   }
 }
 
@@ -1096,11 +1327,14 @@ document.addEventListener("DOMContentLoaded", () => {
     renderAll();
   });
 
-  // Filters
+  // Filters mês
   document.getElementById("filterMonth").addEventListener("change", renderAll);
   document.getElementById("filterType").addEventListener("change", renderAll);
   document.getElementById("filterAccount").addEventListener("change", renderAll);
   document.getElementById("filterCostCenter").addEventListener("change", renderAll);
+
+  // Filter ano
+  document.getElementById("filterYear").addEventListener("change", renderYearSection);
 
   // Buttons
   document.getElementById("btnSeed").addEventListener("click", seedData);
@@ -1115,6 +1349,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("fileImportJson").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
     if(file) importJsonFile(file);
+  });
+
+  document.getElementById("fileImportCsv").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if(file) importCsvFile(file);
   });
 
   document.getElementById("btnAddAccount").addEventListener("click", addAccount);
