@@ -13,7 +13,7 @@
       <span class="logo">GM</span>
       <div class="brand-text">
         <div class="brand-name">Gestão MPE</div>
-        <div class="brand-sub">protótipo • offline</div>
+        <div class="brand-sub">v0.3 • offline</div>
       </div>
     </div>
 
@@ -26,12 +26,12 @@
     <section class="card hero">
       <div>
         <h1>Visão rápida</h1>
-        <p class="muted">Cadastre entradas e saídas, acompanhe o saldo e exporte relatórios.</p>
+        <p class="muted">Cadastre entradas e saídas por conta e centro de custo, acompanhe o saldo e exporte relatórios.</p>
       </div>
 
       <div class="kpis">
         <div class="kpi">
-          <div class="kpi-label">Saldo atual</div>
+          <div class="kpi-label">Saldo geral</div>
           <div class="kpi-value" id="kpiBalance">R$ 0,00</div>
         </div>
         <div class="kpi">
@@ -54,6 +54,20 @@
 
     <!-- Lançamentos -->
     <section class="view" id="view-lancamentos">
+
+      <!-- Contas e Centro de Custo -->
+      <div class="card">
+        <div class="row space">
+          <h2>Contas e Centros de custo</h2>
+          <div class="actions">
+            <button class="btn" id="btnAddAccount">+ Conta</button>
+            <button class="btn" id="btnAddCostCenter">+ Centro de custo</button>
+          </div>
+        </div>
+
+        <div class="grid-2" id="accountsPanel"></div>
+      </div>
+
       <div class="card">
         <h2>Novo lançamento</h2>
         <form id="txForm" class="form">
@@ -72,13 +86,23 @@
             </label>
 
             <label class="field">
-              <span>Valor (R$)</span>
+              <span>Valor</span>
               <input id="txAmount" type="number" step="0.01" min="0" placeholder="0,00" required />
             </label>
 
             <label class="field">
               <span>Categoria</span>
               <input id="txCategory" type="text" placeholder="Ex: Vendas, Aluguel, Marketing" required />
+            </label>
+
+            <label class="field">
+              <span>Conta</span>
+              <select id="txAccount" required></select>
+            </label>
+
+            <label class="field">
+              <span>Centro de custo</span>
+              <select id="txCostCenter" required></select>
             </label>
           </div>
 
@@ -114,6 +138,8 @@
               <tr>
                 <th>Data</th>
                 <th>Tipo</th>
+                <th>Conta</th>
+                <th>Centro</th>
                 <th>Categoria</th>
                 <th class="right">Valor</th>
                 <th></th>
@@ -132,7 +158,9 @@
       <div class="card">
         <div class="row space">
           <h2>Relatórios</h2>
-          <button class="btn primary" id="btnExportCsv">Exportar CSV</button>
+          <div class="actions">
+            <button class="btn primary" id="btnExportCsv">Exportar CSV</button>
+          </div>
         </div>
 
         <div class="grid-2">
@@ -145,6 +173,16 @@
             <h3>Por categoria</h3>
             <div class="mini" id="reportByCategory"></div>
           </div>
+
+          <div class="panel">
+            <h3>Por conta</h3>
+            <div class="mini" id="reportByAccount"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Por centro de custo</h3>
+            <div class="mini" id="reportByCostCenter"></div>
+          </div>
         </div>
 
         <p class="muted small">Observação: este protótipo roda offline e salva no seu navegador (localStorage).</p>
@@ -155,18 +193,18 @@
     <section class="view hidden" id="view-projecoes">
       <div class="card">
         <h2>Projeções (MVP)</h2>
-        <p class="muted">Aqui vamos colocar sugestões baseadas nos dados (ex: meta de caixa, reserva, teto de gastos).</p>
+        <p class="muted">Sugestões simples baseadas nos dados do mês selecionado.</p>
 
         <div class="grid-2">
           <div class="panel">
             <h3>Reserva recomendada</h3>
-            <p class="muted small">Regra simples: <strong>1 a 3 meses</strong> do custo fixo.</p>
+            <p class="muted small">Regra simples: <strong>1 a 3 meses</strong> do custo médio (saídas).</p>
             <div class="mini" id="projReserve"></div>
           </div>
 
           <div class="panel">
             <h3>Meta de saldo</h3>
-            <p class="muted small">Proposta inicial: manter saldo > <strong>30 dias</strong> de saídas médias.</p>
+            <p class="muted small">Proposta: manter saldo > <strong>30 dias</strong> de saídas médias.</p>
             <div class="mini" id="projTarget"></div>
           </div>
         </div>
@@ -203,10 +241,9 @@
           <button class="btn primary" id="btnSaveCfg">Salvar</button>
         </div>
 
-        
         <div class="panel">
           <h3>Backup e restauração</h3>
-          <p class="muted small">Exporta/Importa tudo (configurações + lançamentos) em JSON. Útil para backup e troca de dispositivo.</p>
+          <p class="muted small">Exporta/Importa tudo (configurações + lançamentos) em JSON.</p>
           <div class="actions">
             <button class="btn primary" id="btnExportJson">Exportar JSON</button>
             <label class="btn filelike">
@@ -220,10 +257,8 @@
         <details class="details">
           <summary>Roadmap (próximas etapas)</summary>
           <ul class="list">
-            <li>Cadastro de contas (bancos/caixa) e centro de custos.</li>
             <li>Relatórios anuais + gráficos.</li>
-            <li>Importação/Exportação JSON + backup.</li>
-            <li>Notas/boletos/NF (integrações futuras).</li>
+            <li>Importação CSV e categorização automática.</li>
             <li>Multiusuário e sincronização (quando houver backend).</li>
           </ul>
         </details>
@@ -231,7 +266,7 @@
     </section>
 
     <footer class="footer">
-      <span class="muted small">v0.1 • Mobile-first • GitHub Pages</span>
+      <span class="muted small">v0.3 • Mobile-first • GitHub Pages</span>
     </footer>
   </main>
 
